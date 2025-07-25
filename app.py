@@ -39,7 +39,7 @@ limiter = Limiter(
 # Load environment variables
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-QDRANT_URL = os.getenv("QDRANT_URL", "https://cea387aa-06e7-46e5-a487-dc8903274f26.us-east4-0.gcp.cloud.qdrant.io")
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
 
 # Validate environment variables
@@ -57,19 +57,23 @@ if missing_vars:
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 def get_qdrant_client():
+    """
+    Initialize Qdrant client with retries and check for Content collection existence.
+    """
     for attempt in range(3):
         try:
             qdrant_client = QdrantClient(
                 url=QDRANT_URL,
                 api_key=QDRANT_API_KEY
             )
-            # Check if collection exists
+            logger.info(f"Qdrant client initialized, attempt {attempt + 1}")
             if qdrant_client.collection_exists("Content"):
-                logger.info("Qdrant client initialized and Content collection found")
+                logger.info("Content collection found")
                 return qdrant_client
             else:
                 logger.warning("Content collection not found in Qdrant")
                 qdrant_client.close()
+                raise Exception("Content collection not found")
         except Exception as e:
             logger.error(f"Qdrant client initialization attempt {attempt + 1} failed: {str(e)}")
     logger.error("Failed to initialize Qdrant client after 3 attempts")
@@ -193,11 +197,11 @@ def search_content():
             items = []
             for point in paginated:
                 payload = point.payload
-                content_id = payload.get("content_id", str(point.id))
+                content_id = payload.get("content_id", str(point.id))  # Use payload content_id
                 logger.info(f"Processing item: Content ID: {content_id}, Score: {point.score}")
                 item = {
                     "content_id": content_id,
-                    "score": 1 - point.score,  # Convert Qdrant's similarity score to distance (1 - cosine similarity)
+                    "score": 1 - point.score,  # Convert Qdrant's similarity score to distance
                     "title": strip_html(payload.get("title", "N/A")),
                     "description": strip_html(payload.get("description", ""))
                 }
