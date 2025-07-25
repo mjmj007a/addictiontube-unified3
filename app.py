@@ -23,9 +23,14 @@ CORS(app, resources={r"/*": {"origins": ["https://addictiontube.com", "http://ad
 # Configure logging
 logger = logging.getLogger('addictiontube')
 logger.setLevel(logging.DEBUG)
-handler = RotatingFileHandler('/tmp/unified_search.log', maxBytes=10485760, backupCount=5)
-handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
-logger.addHandler(handler)
+# File handler
+file_handler = RotatingFileHandler('/tmp/unified_search.log', maxBytes=10485760, backupCount=5)
+file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+logger.addHandler(file_handler)
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+logger.addHandler(console_handler)
 
 # Initialize Flask-Limiter
 limiter = Limiter(
@@ -39,7 +44,7 @@ limiter = Limiter(
 # Load environment variables
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-QDRANT_URL = os.getenv("QDRANT_URL", "https://cea387aa-06e7-46e5-a487-dc8903274f26.us-east4-0.gcp.cloud.qdrant.io")
+QDRANT_URL = os.getenv("QDRANT_URL", "https://cea387aa-06e7-46e5-a487-dc8903274f26.us-east4-0.gcp.cloud.qdrant.io:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 # Validate environment variables
