@@ -39,7 +39,7 @@ limiter = Limiter(
 # Load environment variables
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-QDRANT_URL = os.getenv("QDRANT_URL", "https://cea387aa-06e7-46e5-a487-dc8903274f26.us-east4-0.gcp.cloud.qdrant.io:6333")
+QDRANT_URL = os.getenv("QDRANT_URL", "https://cea387aa-06e7-46e5-a487-dc8903274f26.us-east4-0.gcp.cloud.qdrant.io")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 # Validate environment variables
