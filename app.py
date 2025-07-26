@@ -24,15 +24,12 @@ CORS(app, resources={r"/*": {"origins": ["https://addictiontube.com", "http://ad
 # Configure logging
 logger = logging.getLogger('addictiontube')
 logger.setLevel(logging.DEBUG)
-# Ensure log directory exists
 log_dir = os.path.join(os.path.dirname(__file__), 'logs')
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, 'unified_search.log')
-# File handler
 file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
 file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
 logger.addHandler(file_handler)
-# Console handler
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
 logger.addHandler(console_handler)
@@ -58,6 +55,8 @@ if not OPENAI_API_KEY:
     missing_vars.append("OPENAI_API_KEY")
 if not QDRANT_URL:
     missing_vars.append("QDRANT_URL")
+if not QDRANT_API_KEY:
+    missing_vars.append("QDRANT_API_KEY")
 if missing_vars:
     error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
     logger.error(error_msg)
@@ -100,18 +99,34 @@ def get_qdrant_client():
     logger.error("Failed to initialize Qdrant client after 3 attempts")
     raise EnvironmentError("Qdrant client initialization failed")
 
-# Load metadata
+# Load metadata with error handling
+song_dict = {}
+poem_dict = {}
+story_dict = {}
 try:
     with open('songs_revised_with_songs-july06.json', 'r', encoding='utf-8') as f:
         song_dict = {item['video_id']: item['song'] for item in json.load(f)}
+    logger.info("Loaded songs_revised_with_songs-july06.json")
+except FileNotFoundError:
+    logger.warning("songs_revised_with_songs-july06.json not found, initializing empty song_dict")
+except Exception as e:
+    logger.error(f"Failed to load songs_revised_with_songs-july06.json: {str(e)}")
+try:
     with open('videos_revised_with_poems-july04.json', 'r', encoding='utf-8') as f:
         poem_dict = {item['video_id']: item['poem'] for item in json.load(f)}
+    logger.info("Loaded videos_revised_with_poems-july04.json")
+except FileNotFoundError:
+    logger.warning("videos_revised_with_poems-july04.json not found, initializing empty poem_dict")
+except Exception as e:
+    logger.error(f"Failed to load videos_revised_with_poems-july04.json: {str(e)}")
+try:
     with open('stories.json', 'r', encoding='utf-8') as f:
         story_dict = {item['id']: item['text'] for item in json.load(f)}
-    logger.info("Metadata JSON files loaded successfully")
+    logger.info("Loaded stories.json")
+except FileNotFoundError:
+    logger.warning("stories.json not found, initializing empty story_dict")
 except Exception as e:
-    logger.error(f"Failed to load metadata JSON files: {str(e)}")
-    raise
+    logger.error(f"Failed to load stories.json: {str(e)}")
 
 # Initialize NLTK lemmatizer
 try:
@@ -120,7 +135,7 @@ try:
     lemmatizer = WordNetLemmatizer()
     logger.info("NLTK WordNetLemmatizer initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize NLTK WordNetLemmatizer: {str(e)}. Falling back to no lemmatization.")
+    logger.warning(f"Failed to initialize NLTK WordNetLemmatizer: {str(e)}. Falling back to no lemmatization.")
     lemmatizer = None
 
 def strip_html(text):
@@ -197,7 +212,7 @@ def search_content():
     query = re.sub(r'[^\w\s.,!?]', '', request.args.get('q', '')).strip()
     content_type = request.args.get('content_type', '').strip().lower()
     page = max(1, int(request.args.get('page', 1)))
-    size = max(1, min(100, int(request.args.get('per_page', 1))))
+    size = max(1, min(100, int(request.args.get('per_page', 5))))
 
     if not query or not content_type or content_type not in ['songs', 'poems', 'stories']:
         logger.error(f"Invalid request: query='{query}', content_type='{content_type}'")
@@ -205,9 +220,11 @@ def search_content():
 
     qdrant_client = get_qdrant_client()
     try:
+        logger.info(f"Processing query: {query}, content_type: {content_type}, page: {page}, per_page: {size}")
         processed_query = preprocess_query(query)
         try:
             vector = get_embedding(processed_query)
+            logger.info("Query embedding generated successfully")
         except APIError as e:
             logger.error(f"OpenAI embedding failed: {str(e)}")
             return jsonify({"error": "Embedding service unavailable", "details": str(e)}), 500
@@ -215,7 +232,7 @@ def search_content():
         try:
             results = qdrant_client.search(
                 collection_name="Content",
-                query_vector={"default": vector},
+                query_vector=("default", vector),  # Corrected syntax
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -224,37 +241,52 @@ def search_content():
                         )
                     ]
                 ),
-                limit=50,
+                limit=size,
+                offset=(page - 1) * size,
                 with_payload=True,
                 with_vectors=False
             )
-            logger.info(f"Query results: {len(results)} objects found for query='{query}', content_type='{content_type}'")
-            total = len(results)
-            paginated = results[(page - 1) * size:page * size]
-
-            items = []
-            for point in paginated:
-                payload = point.payload
-                content_id = payload.get("content_id", str(point.id))
-                logger.info(f"Processing item: Content ID: {content_id}, Score: {point.score}")
-                item = {
-                    "content_id": content_id,
-                    "score": 1 - point.score,
-                    "title": strip_html(payload.get("title", "N/A")),
-                    "description": strip_html(payload.get("description", ""))
-                }
-                if content_type == 'stories':
-                    item['image'] = payload.get("url", "")
-                elif content_type in ['songs', 'poems']:
-                    item['url'] = payload.get("url", "")
-                items.append(item)
-                logger.info(f"Item: {item}")
-
-            logger.info(f"Search completed: query='{query}', content_type='{content_type}', page={page}, total={total}, returned={len(items)}")
-            return jsonify({"results": items, "total": total})
+            logger.info(f"Qdrant search returned {len(results)} results for query='{query}', content_type='{content_type}'")
         except Exception as e:
-            logger.error(f"Qdrant query failed for {content_type}: {str(e)}")
+            logger.error(f"Qdrant query failed: {str(e)}", exc_info=True)
             return jsonify({"error": "Search service unavailable", "details": str(e)}), 500
+
+        total = qdrant_client.count(
+            collection_name="Content",
+            count_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="type",
+                        match=models.MatchValue(value=content_type)
+                    )
+                ]
+            )
+        ).count
+
+        items = []
+        for point in results:
+            payload = point.payload
+            content_id = payload.get("content_id", str(point.id))
+            logger.debug(f"Processing item: Content ID: {content_id}, Score: {point.score}")
+            item = {
+                "content_id": content_id,
+                "score": point.score,  # Cosine similarity
+                "title": strip_html(payload.get("title", "N/A")),
+                "description": strip_html(payload.get("description", ""))
+            }
+            if content_type == 'stories':
+                item['image'] = payload.get("url", "")
+            elif content_type in ['songs', 'poems']:
+                item['url'] = payload.get("url", "")
+            items.append(item)
+            logger.debug(f"Item added: {item}")
+
+        logger.info(f"Search completed: query='{query}', content_type='{content_type}', page={page}, total={total}, returned={len(items)}")
+        return jsonify({"results": items, "total": total, "page": page, "per_page": size})
+
+    except Exception as e:
+        logger.error(f"Unexpected error in search_content: {str(e)}", exc_info=True)
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
     finally:
         qdrant_client.close()
 
@@ -274,6 +306,7 @@ def rag_answer_content():
         processed_query = preprocess_query(query)
         try:
             vector = get_embedding(processed_query)
+            logger.info("Query embedding generated successfully")
         except APIError as e:
             logger.error(f"OpenAI embedding failed: {str(e)}")
             return jsonify({"error": "Embedding service unavailable", "details": str(e)}), 500
@@ -281,7 +314,7 @@ def rag_answer_content():
         try:
             results = qdrant_client.search(
                 collection_name="Content",
-                query_vector={"default": vector},
+                query_vector=("default", vector),  # Corrected syntax
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -296,7 +329,7 @@ def rag_answer_content():
             )
             logger.info(f"RAG query results: {len(results)} objects found for query='{query}', content_type='{content_type}'")
         except Exception as e:
-            logger.error(f"Qdrant query failed: {str(e)}")
+            logger.error(f"Qdrant query failed: {str(e)}", exc_info=True)
             return jsonify({"error": "Qdrant query failed", "details": str(e)}), 500
 
         matches = results
