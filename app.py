@@ -103,8 +103,9 @@ def get_qdrant_client():
 song_dict = {}
 poem_dict = {}
 story_dict = {}
+base_dir = os.path.dirname(__file__)
 try:
-    with open('songs_revised_with_songs-july06.json', 'r', encoding='utf-8') as f:
+    with open(os.path.join(base_dir, 'songs_revised_with_songs-july06.json'), 'r', encoding='utf-8') as f:
         song_dict = {item['video_id']: item['song'] for item in json.load(f)}
     logger.info("Loaded songs_revised_with_songs-july06.json")
 except FileNotFoundError:
@@ -112,7 +113,7 @@ except FileNotFoundError:
 except Exception as e:
     logger.error(f"Failed to load songs_revised_with_songs-july06.json: {str(e)}")
 try:
-    with open('videos_revised_with_poems-july04.json', 'r', encoding='utf-8') as f:
+    with open(os.path.join(base_dir, 'videos_revised_with_poems-july04.json'), 'r', encoding='utf-8') as f:
         poem_dict = {item['video_id']: item['poem'] for item in json.load(f)}
     logger.info("Loaded videos_revised_with_poems-july04.json")
 except FileNotFoundError:
@@ -120,7 +121,7 @@ except FileNotFoundError:
 except Exception as e:
     logger.error(f"Failed to load videos_revised_with_poems-july04.json: {str(e)}")
 try:
-    with open('stories.json', 'r', encoding='utf-8') as f:
+    with open(os.path.join(base_dir, 'stories.json'), 'r', encoding='utf-8') as f:
         story_dict = {item['id']: item['text'] for item in json.load(f)}
     logger.info("Loaded stories.json")
 except FileNotFoundError:
@@ -188,15 +189,22 @@ def health_check():
 
 @app.route('/debug', methods=['GET'])
 def debug():
-    import qdrant_client
-    return jsonify({
-        "qdrant_client_version": qdrant_client.__version__,
-        "files_present": {
-            "songs": os.path.exists('songs_revised_with_songs-july06.json'),
-            "poems": os.path.exists('videos_revised_with_poems-july04.json'),
-            "stories": os.path.exists('stories.json')
-        }
-    })
+    try:
+        import qdrant_client
+        base_dir = os.path.dirname(__file__)
+        return jsonify({
+            "qdrant_client_version": qdrant_client.__version__,
+            "files_present": {
+                "songs": os.path.exists(os.path.join(base_dir, 'songs_revised_with_songs-july06.json')),
+                "poems": os.path.exists(os.path.join(base_dir, 'videos_revised_with_poems-july04.json')),
+                "stories": os.path.exists(os.path.join(base_dir, 'stories.json'))
+            },
+            "working_directory": os.getcwd(),
+            "app_directory": base_dir
+        })
+    except Exception as e:
+        logger.error(f"Debug endpoint failed: {str(e)}", exc_info=True)
+        return jsonify({"error": "Debug endpoint failed", "details": str(e)}), 500
 
 @app.errorhandler(429)
 def ratelimit_handler(e):
@@ -232,7 +240,7 @@ def search_content():
         try:
             results = qdrant_client.search(
                 collection_name="Content",
-                query_vector=("default", vector),  # Corrected syntax
+                query_vector=("default", vector),
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -270,7 +278,7 @@ def search_content():
             logger.debug(f"Processing item: Content ID: {content_id}, Score: {point.score}")
             item = {
                 "content_id": content_id,
-                "score": point.score,  # Cosine similarity
+                "score": point.score,
                 "title": strip_html(payload.get("title", "N/A")),
                 "description": strip_html(payload.get("description", ""))
             }
@@ -314,7 +322,7 @@ def rag_answer_content():
         try:
             results = qdrant_client.search(
                 collection_name="Content",
-                query_vector=("default", vector),  # Corrected syntax
+                query_vector=("default", vector),
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
