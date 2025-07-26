@@ -62,9 +62,6 @@ if missing_vars:
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 def get_qdrant_client():
-    """
-    Initialize Qdrant client with retries and check for Content collection existence.
-    """
     for attempt in range(3):
         try:
             qdrant_client = QdrantClient(
@@ -72,11 +69,12 @@ def get_qdrant_client():
                 api_key=QDRANT_API_KEY
             )
             logger.info(f"Qdrant client initialized, attempt {attempt + 1}")
-            if qdrant_client.collection_exists("Content"):
+            try:
+                qdrant_client.get_collection("Content")
                 logger.info("Content collection found")
                 return qdrant_client
-            else:
-                logger.warning("Content collection not found in Qdrant")
+            except Exception as e:
+                logger.warning(f"Content collection not found in Qdrant: {str(e)}")
                 qdrant_client.close()
                 raise Exception("Content collection not found")
         except Exception as e:
@@ -139,8 +137,8 @@ def health_check():
     logger.info("Health check endpoint accessed")
     qdrant_client = get_qdrant_client()
     try:
-        if not qdrant_client.collection_exists("Content"):
-            return jsonify({"error": "Content collection not found"}), 503
+        if not qdrant_client.get_collection("Content"):
+    return jsonify({"error": "Content collection not found"}), 503
         try:
             embedding = get_embedding("test")
             logger.info("OpenAI embedding test successful")
