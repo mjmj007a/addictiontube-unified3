@@ -215,7 +215,7 @@ def search_content():
         try:
             results = qdrant_client.search(
                 collection_name="Content",
-                query_vector=vector,
+                query_vector={"default": vector},
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
@@ -281,7 +281,7 @@ def rag_answer_content():
         try:
             results = qdrant_client.search(
                 collection_name="Content",
-                query_vector=vector,
+                query_vector={"default": vector},
                 query_filter=models.Filter(
                     must=[
                         models.FieldCondition(
