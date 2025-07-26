@@ -137,12 +137,14 @@ def health_check():
     logger.info("Health check endpoint accessed")
     qdrant_client = get_qdrant_client()
     try:
-        if not qdrant_client.get_collection("Content"):
-    return jsonify({"error": "Content collection not found"}), 503
+        if not qdrant_client.collection_exists("Content"):
+            logger.warning("Content collection not found in Qdrant")
+            return jsonify({"error": "Content collection not found"}), 503
         try:
             embedding = get_embedding("test")
             logger.info("OpenAI embedding test successful")
         except APIError as e:
+            logger.error(f"OpenAI health check failed: {str(e)}")
             return jsonify({"error": "OpenAI health check failed", "details": str(e)}), 503
         return jsonify({"status": "ok", "message": "AddictionTube Unified API is running"}), 200
     finally:
