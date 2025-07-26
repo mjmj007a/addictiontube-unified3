@@ -5,6 +5,7 @@ from flask_limiter.util import get_remote_address
 from openai import OpenAI, APIError
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from qdrant_client.http.models import VectorParams, Distance
 import os
 import re
 import json
@@ -23,8 +24,12 @@ CORS(app, resources={r"/*": {"origins": ["https://addictiontube.com", "http://ad
 # Configure logging
 logger = logging.getLogger('addictiontube')
 logger.setLevel(logging.DEBUG)
+# Ensure log directory exists
+log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'unified_search.log')
 # File handler
-file_handler = RotatingFileHandler('/tmp/unified_search.log', maxBytes=10485760, backupCount=5)
+file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
 file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
 logger.addHandler(file_handler)
 # Console handler
@@ -74,9 +79,22 @@ def get_qdrant_client():
                 logger.info("Content collection found")
                 return qdrant_client
             except Exception as e:
-                logger.warning(f"Content collection not found in Qdrant: {str(e)}")
-                qdrant_client.close()
-                raise Exception("Content collection not found")
+                logger.warning(f"'Content' collection not found: {str(e)}")
+                try:
+                    logger.info("Creating 'Content' collection in Qdrant...")
+                    qdrant_client.recreate_collection(
+                        collection_name="Content",
+                        vectors_config=VectorParams(
+                            size=1536,  # text-embedding-3-small
+                            distance=Distance.COSINE
+                        )
+                    )
+                    logger.info("Content collection created successfully.")
+                    return qdrant_client
+                except Exception as inner_e:
+                    logger.error(f"Failed to create Content collection: {str(inner_e)}")
+                    qdrant_client.close()
+                    raise
         except Exception as e:
             logger.error(f"Qdrant client initialization attempt {attempt + 1} failed: {str(e)}")
     logger.error("Failed to initialize Qdrant client after 3 attempts")
@@ -137,8 +155,11 @@ def health_check():
     logger.info("Health check endpoint accessed")
     qdrant_client = get_qdrant_client()
     try:
-        if not qdrant_client.collection_exists("Content"):
-            logger.warning("Content collection not found in Qdrant")
+        try:
+            qdrant_client.get_collection("Content")
+            logger.info("Content collection found in health check")
+        except Exception as e:
+            logger.warning(f"Content collection not found in Qdrant: {str(e)}")
             return jsonify({"error": "Content collection not found"}), 503
         try:
             embedding = get_embedding("test")
@@ -149,6 +170,18 @@ def health_check():
         return jsonify({"status": "ok", "message": "AddictionTube Unified API is running"}), 200
     finally:
         qdrant_client.close()
+
+@app.route('/debug', methods=['GET'])
+def debug():
+    import qdrant_client
+    return jsonify({
+        "qdrant_client_version": qdrant_client.__version__,
+        "files_present": {
+            "songs": os.path.exists('songs_revised_with_songs-july06.json'),
+            "poems": os.path.exists('videos_revised_with_poems-july04.json'),
+            "stories": os.path.exists('stories.json')
+        }
+    })
 
 @app.errorhandler(429)
 def ratelimit_handler(e):
@@ -191,7 +224,7 @@ def search_content():
                         )
                     ]
                 ),
-                limit=50,  # Increased to fetch all relevant results
+                limit=50,
                 with_payload=True,
                 with_vectors=False
             )
@@ -202,11 +235,11 @@ def search_content():
             items = []
             for point in paginated:
                 payload = point.payload
-                content_id = payload.get("content_id", str(point.id))  # Use payload content_id
+                content_id = payload.get("content_id", str(point.id))
                 logger.info(f"Processing item: Content ID: {content_id}, Score: {point.score}")
                 item = {
                     "content_id": content_id,
-                    "score": 1 - point.score,  # Convert Qdrant's similarity score to distance
+                    "score": 1 - point.score,
                     "title": strip_html(payload.get("title", "N/A")),
                     "description": strip_html(payload.get("description", ""))
                 }
@@ -257,7 +290,7 @@ def rag_answer_content():
                         )
                     ]
                 ),
-                limit=50,  # Increased for RAG context
+                limit=50,
                 with_payload=True,
                 with_vectors=False
             )
