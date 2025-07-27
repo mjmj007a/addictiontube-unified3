@@ -84,7 +84,7 @@ def get_qdrant_client():
                     qdrant_client.recreate_collection(
                         collection_name="Content",
                         vectors_config=VectorParams(
-                            size=1536,  # text-embedding-3-small
+                            size=1536,
                             distance=Distance.COSINE
                         )
                     )
@@ -204,7 +204,6 @@ def debug():
             "working_directory": os.getcwd(),
             "app_directory": base_dir
         }
-        # Check JSON file contents
         for file_name in ['songs_revised_with_songs-july06.json', 'videos_revised_with_poems-july04.json', 'stories.json', 'song-locations.json', 'video_locations.json']:
             file_path = os.path.join(base_dir, file_name)
             if os.path.exists(file_path):
@@ -212,6 +211,8 @@ def debug():
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         debug_info[f"{file_name}_count"] = len(data) if isinstance(data, list) else 0
+                        if isinstance(data, list) and data:
+                            debug_info[f"{file_name}_sample_id"] = data[0].get('content_id') or data[0].get('video_id') or data[0].get('id')
                 except Exception as e:
                     debug_info[f"{file_name}_error"] = str(e)
             else:
@@ -296,7 +297,7 @@ def search_content():
                 "score": point.score,
                 "title": strip_html(payload.get("title", "N/A")),
                 "description": strip_html(payload.get("description", "")),
-                "image": payload.get("url", "")  # Consistent image field for all types
+                "image": payload.get("url", "")
             }
             items.append(item)
             logger.debug(f"Item added: {item}")
