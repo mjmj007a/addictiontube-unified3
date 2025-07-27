@@ -192,16 +192,31 @@ def debug():
     try:
         import qdrant_client
         base_dir = os.path.dirname(__file__)
-        return jsonify({
+        debug_info = {
             "qdrant_client_version": qdrant_client.__version__,
             "files_present": {
                 "songs": os.path.exists(os.path.join(base_dir, 'songs_revised_with_songs-july06.json')),
                 "poems": os.path.exists(os.path.join(base_dir, 'videos_revised_with_poems-july04.json')),
-                "stories": os.path.exists(os.path.join(base_dir, 'stories.json'))
+                "stories": os.path.exists(os.path.join(base_dir, 'stories.json')),
+                "song_locations": os.path.exists(os.path.join(base_dir, 'song-locations.json')),
+                "video_locations": os.path.exists(os.path.join(base_dir, 'video_locations.json'))
             },
             "working_directory": os.getcwd(),
             "app_directory": base_dir
-        })
+        }
+        # Check JSON file contents
+        for file_name in ['songs_revised_with_songs-july06.json', 'videos_revised_with_poems-july04.json', 'stories.json', 'song-locations.json', 'video_locations.json']:
+            file_path = os.path.join(base_dir, file_name)
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        debug_info[f"{file_name}_count"] = len(data) if isinstance(data, list) else 0
+                except Exception as e:
+                    debug_info[f"{file_name}_error"] = str(e)
+            else:
+                debug_info[f"{file_name}_error"] = "File not found"
+        return jsonify(debug_info)
     except Exception as e:
         logger.error(f"Debug endpoint failed: {str(e)}", exc_info=True)
         return jsonify({"error": "Debug endpoint failed", "details": str(e)}), 500
@@ -280,12 +295,9 @@ def search_content():
                 "content_id": content_id,
                 "score": point.score,
                 "title": strip_html(payload.get("title", "N/A")),
-                "description": strip_html(payload.get("description", ""))
+                "description": strip_html(payload.get("description", "")),
+                "image": payload.get("url", "")  # Consistent image field for all types
             }
-            if content_type == 'stories':
-                item['image'] = payload.get("url", "")
-            elif content_type in ['songs', 'poems']:
-                item['url'] = payload.get("url", "")
             items.append(item)
             logger.debug(f"Item added: {item}")
 
